@@ -7,7 +7,7 @@
 - Map remote project paths only through explicit local cwd mappings; history-only defaults, disjoint source-specific session ids, continuation ordering, cancellation and mapping-drift checks.
 - Keep auto-import/export local-only, preserve upstream tests, add Windows-compatible tests and adversarial regression coverage. Exclude upstream private deployment notes from the npm artifact.
 - Add explicit Windows OpenSSH sources (`platform: windows`), fixed PowerShell/`py -3` launch, pinned no-reparse Win32 reading, drive-path mappings and binary protocol tests.
-- Real Windows SSH catalog/dry-run verified read-only with bounded rollouts and zero persistence writes. No npm publication or production-profile installation; live GUI acceptance and Linux filesystem tests remain separate gates.
+- Real Windows SSH catalog/dry-run verified read-only with bounded rollouts and zero persistence writes. Admit exact DSH MCP client 0.2.1-rc.3 after validating the unchanged bridge and the new tool schema against the installed runtime contracts. No npm publication; live GUI acceptance and Linux filesystem tests remain separate gates.
 
 ## 1.6.2 — 2026-10-05
 
