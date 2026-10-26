@@ -20,6 +20,7 @@ const suites = [
   'test/ssh-source.test.mjs',
   'test/ssh-windows.test.mjs',
   'test/import-operations.test.mjs',
+  'test/source-management.test.mjs',
 ]
 
 function findDshCheckout() {

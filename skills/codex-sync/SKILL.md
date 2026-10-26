@@ -30,6 +30,8 @@ Composer **Sync ▾** → **Import from Codex** opens the picker. After a succes
 
 ## SSH remote conversations
 
+Configure sources in **Codex Sync → SSH sources**, or use deferred `codex_sources`: `list` returns the current revision and editable sources; `save`/`delete` require that revision and explicit user intent; `test` checks a saved source or draft without reading chats. Save does not connect or import. Keep ids stable; do not request passwords/keys, invent hosts, or overwrite a revision conflict. Deleting a source keeps imported histories. Hostnames and paths remain local profile configuration, never repository defaults.
+
 Use the deferred `codex_import` tool when available: `action: "sources"` discovers configured ids; `catalog` browses; `preview` writes no DSH sessions; `import` writes selected history. Omit `source` for local Codex. Catalog tool results are bounded; use `offset` to page projects, or the picker for very large projects.
 
 ```text

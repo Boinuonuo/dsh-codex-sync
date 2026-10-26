@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.6.3-ssh.0 — local fork preview (unreleased)
+## 1.6.3-ssh.1 — fork preview (not published to npm)
+
+- Add bilingual SSH source management from Codex Sync settings and the import picker, including the empty state. Create/edit/delete sources without hand-editing YAML; show validation, stale-revision and persistence failures.
+- Persist only through Harness configuration management, preserving other plugin settings. Save/delete never connects to SSH or imports sessions. Keep source ids stable and refuse rebinding imported history to another target.
+- Add an explicit metadata-only connection test: verify SSH authentication, remote Python and the safe sessions root, without enumerating rollouts or transferring conversation bodies.
+- Share source operations with the deferred `codex_sources` tool; use optimistic revisions and same-origin JSON management requests. Existing local import/export and manual remote preview/import remain separate.
+
+## 1.6.3-ssh.0 — fork preview (not published to npm)
 
 - Add configured read-only SSH session sources, bounded temporary snapshots, strict host-key verification, and plain/concatenated-Zstandard rollout support.
 - Share source discovery/catalog/preview/import between the picker, slash command and deferred agent tool; remote import errors never fall back to local import.

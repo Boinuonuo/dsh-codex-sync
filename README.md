@@ -46,6 +46,10 @@
 
 ---
 
+## SSH history pull (fork preview)
+
+Open **Codex Sync → SSH sources** to add or edit a local source (SSH alias, POSIX/Windows, remote Codex home, optional port/mappings/limits). Saving does not connect or import. An explicit **Test connection** checks login, Python and the safe sessions root without reading chats. Then choose the saved source in **Import from Codex**, preview, and import selected conversations once. No remote writeback or background SSH sync. Authentication stays in the host's OpenSSH configuration; no password/key fields. See [SSH import setup and safety](docs/SSH-IMPORT.md).
+
 ## 🤔 Why dsh-codex-sync?
 
 When using OpenAI Codex, developers build up significant workflow assets:

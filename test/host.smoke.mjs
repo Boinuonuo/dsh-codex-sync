@@ -121,7 +121,7 @@ command = "computer"
     }
     class StubTools extends Service {
       constructor(c) { super(c, 'tools', true) }
-      register(def) { this.definition = def; return () => {} }
+      register(def) { this.definitions ??= {}; this.definitions[def.name] = def; if (def.name === 'codex_import') this.definition = def; return () => {} }
     }
     class StubPersistence extends Service {
       constructor(c) { super(c, 'sessionPersistence', true) }
@@ -205,10 +205,11 @@ command = "computer"
 
     // HTTP server endpoints: /settings, /setting, /mcp-status
     const { Readable } = await import('node:stream')
-    const callHttp = async (method, path, body = null) => {
+    const callHttp = async (method, path, body = null, requestHeaders = {}) => {
       const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : [])
       req.method = method
       req.url = path
+      req.headers = { host: 'localhost', 'content-type': 'application/json', origin: 'http://localhost', ...requestHeaders }
       let out = ''
       const headers = {}
       const res = {
@@ -235,6 +236,20 @@ command = "computer"
     assert.equal(ctx.tools.definition.deferLoading, true)
     const toolSources = await ctx.tools.definition.execute({ action: 'sources' }, { signal: new AbortController().signal })
     assert.deepEqual(toolSources, getSources.data)
+    const sourceConfig = await callHttp('GET', '/dsh-codex-sync/source-config')
+    assert.equal(sourceConfig.status, 200)
+    assert.equal(sourceConfig.data.sources[0].host, 'test.invalid')
+    assert.equal(sourceConfig.data.writable, false, 'no configEditor means no hidden file-writing fallback')
+    const sourceTool = ctx.tools.definitions.codex_sources
+    assert.equal(sourceTool.deferLoading, true)
+    assert.deepEqual(await sourceTool.execute({ action: 'list' }, { signal: new AbortController().signal }), sourceConfig.data)
+    const sourceSave = await callHttp('POST', '/dsh-codex-sync/source-config', { action: 'save', id: 'other', source: { host: 'other.invalid' }, revision: sourceConfig.data.revision })
+    assert.equal(sourceSave.status, 503)
+    const unknownSourceAction = await callHttp('POST', '/dsh-codex-sync/source-config', { action: 'unknown' })
+    assert.equal(unknownSourceAction.status, 400)
+    assert.equal((await callHttp('POST', '/dsh-codex-sync/source-config', { action: 'list' }, { origin: 'https://foreign.invalid' })).status, 403)
+    assert.equal((await callHttp('GET', '/dsh-codex-sync/source-config', null, { 'sec-fetch-site': 'cross-site' })).status, 403)
+    assert.equal((await callHttp('POST', '/dsh-codex-sync/source-config', { action: 'list' }, { 'content-type': 'text/plain' })).status, 415)
     const localPreview = await callHttp('POST', '/dsh-codex-sync/import', { dryRun: true, ids: [] })
     assert.equal(localPreview.status, 200)
     assert.match(localPreview.data.text, /dry-run/)

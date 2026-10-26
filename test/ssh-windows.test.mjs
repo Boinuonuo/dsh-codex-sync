@@ -88,6 +88,17 @@ test('Windows reader rejects junction roots and ignores junction children', { sk
   assert.deepEqual(await readdir(stage), [])
 })
 
+test('Windows connection test validates safe root without enumerating rollouts', { skip: !hasWindowsPython }, async t => {
+  const { home, stage } = await fixture(t)
+  await writeFile(join(home, 'sessions', 'rollout-large.jsonl'), 'X'.repeat(500))
+  const probe = __test.createProbeSshSource({ spawn(executable, args, options) {
+    assert.equal(executable, 'ssh')
+    return spawn('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', args.at(-1).split(' ').at(-1)], options)
+  } })
+  assert.deepEqual(await probe({ ...source(home), maxTotalBytes: 1, maxSessionBytes: 1 }), { ok: true, platform: 'windows', sessionRoot: true })
+  assert.deepEqual(await readdir(stage), [])
+})
+
 test('Windows reader reports missing roots and budget limits instead of partial success', { skip: !hasWindowsPython }, async t => {
   const { home, stage, base } = await fixture(t)
   await assert.rejects(transport(stage)(source(join(base, 'absent')), () => assert.fail()), { code: 'SSH_ROOT_MISSING' })

@@ -72,6 +72,30 @@ function adapter(base, bytes, options = {}) {
 
 async function empty(base) { assert.deepEqual(await readdir(base), [], 'all snapshot artifacts removed') }
 
+test('connection test verifies root only with no snapshot directory or rollout transfer', async t => {
+  const base = await fixture(t)
+  let receivedArgs
+  const bytes = Buffer.concat([header({ type: 'probe', platform: 'posix', sessionRoot: true }), payload([])])
+  const probe = __test.createProbeSshSource({ tmpdir: () => { assert.fail('probe must not stage files') }, spawn(executable, args) {
+    assert.equal(executable, 'ssh'); receivedArgs = args
+    return fakeProcess(bytes)
+  } })
+  assert.deepEqual(await probe(source()), { ok: true, platform: 'posix', sessionRoot: true })
+  const config = JSON.parse(Buffer.from(receivedArgs.at(-1).split("'")[1], 'base64'))
+  assert.equal(config.probeOnly, true)
+  await empty(base)
+})
+
+test('connection test rejects bodies, malformed completion and errors; abort never spawns', async () => {
+  for (const bytes of [payload([['rollout-forbidden.jsonl', 'do not transfer']]), header({ type: 'probe', platform: 'windows', sessionRoot: true }), header({ type: 'error', message: 'SSH_ROOT_MISSING: absent' })]) {
+    const probe = __test.createProbeSshSource({ spawn: () => fakeProcess(bytes) })
+    await assert.rejects(probe(source()))
+  }
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(__test.createProbeSshSource({ spawn: () => assert.fail('already aborted') })(source(), { signal: controller.signal }), { code: 'ABORT_ERR' })
+  await assert.rejects(__test.createProbeSshSource({ spawn: () => fakeProcess('', { hang: true }) })(source({ timeoutMs: 40 })), { code: 'SSH_TIMEOUT' })
+})
+
 // Configuration deliberately has no process/runner/flags escape hatches.
 test('normalize named sources preserves stable ids, labels and bounded defaults', () => {
   assert.deepEqual(normalizeSshSources(undefined), [])

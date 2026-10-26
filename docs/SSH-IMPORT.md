@@ -5,7 +5,7 @@ This fork adds **read-only remote Codex conversation import** to the existing pi
 ## Scope
 
 - Local/import/export behavior stays local by default. Auto-import does not connect to SSH sources.
-- Remote sources are explicitly configured. The UI selects a source id; it cannot submit a host, executable, SSH options, password, or shell script.
+- Remote sources are explicitly configured through **SSH sources** in Codex Sync or through the normal profile configuration. The import picker submits only a saved source id. The source manager accepts a validated host/path/platform but no executable, arbitrary SSH options, password, key contents or shell script.
 - The source is read-only: only `sessions/**/rollout-*.jsonl` and `.jsonl.zst` are enumerated/read. No auth files, Codex config, SQLite databases, Skills, MCP settings or instructions are copied.
 - Remote JSONL and concatenated/checksummed Zstandard rollouts are decoded with byte limits. Corrupt compression aborts the snapshot; oversized individual files are skipped with a count. Count/aggregate/time limits fail explicitly instead of importing a silently incomplete snapshot.
 - Import history is not remote execution. A `cwdMappings` entry explicitly selects a local working directory. Unmapped sessions get no cwd (history only). A continuation uses the normal DSH execution environment, not SSH.
@@ -21,7 +21,13 @@ Before using the plugin, connect to the intended alias yourself with system SSH 
 
 ## Configure sources
 
-Add `sshSources` to the existing plugin row's config using DSH's normal configuration management. Do not create a duplicate plugin row. Example only (replace placeholders locally; never commit personal hostnames, paths, keys or session data):
+Open **Codex Sync → SSH sources** (also available beside the import picker's source selector). Click **Add SSH source**, choose a stable source id and enter the SSH alias, platform and Codex home. Authentication uses the host's existing SSH configuration; the form has no password/key fields. Advanced settings contain optional cwd mappings and size/time limits.
+
+**Save** only persists the validated source through DSH's normal configuration management, in the host's local profile. It never connects, imports, or pushes configuration to GitHub. **Test connection** explicitly checks authentication, remote Python and the sessions directory (up to 30 seconds), without enumerating or copying conversations. It can test an unsaved draft. Verify the host fingerprint with system SSH before testing; host-key checking is never bypassed.
+
+Editing keeps the id fixed. Deleting a source removes its configuration, not imported DSH histories or remote files. An id associated with imported history cannot be rebound to another host/platform/root; use a new id. Stale edits return a conflict rather than overwrite another window's changes. Existing cwd-mapping drift checks still protect previously imported sessions.
+
+The manager requires the Harness `configEditor` service. Older hosts without it show a read-only reason rather than writing profile files directly. Manual configuration remains supported: add `sshSources` to the existing plugin row's config; do not create a duplicate row. Example only (replace placeholders locally; never commit personal hostnames, paths, keys or session data):
 
 ```yaml
 sshSources:

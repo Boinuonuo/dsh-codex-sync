@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url)
 function loadImportTests(React, globals = {}) {
   const source = readFileSync(join(PROJECT, 'lib', 'client.js'), 'utf8')
   const patched = source.replace('return module.exports; } });',
-    'module.exports.__cxTest = { ImportPicker, ImportSourceSelect, ImportDirectoryMapping, configuredImportSources, importCatalogUrl, importPreviewKey, isNodeSelectable, collectSelectable, labels }; return module.exports; } });')
+    'module.exports.__cxTest = { SshSourceManager, sshDraft, sshPayload, sshLabels, ImportPicker, ImportSourceSelect, ImportDirectoryMapping, configuredImportSources, importCatalogUrl, importPreviewKey, isNodeSelectable, collectSelectable, labels }; return module.exports; } });')
   assert.notEqual(patched, source)
   let factory
   const windowMock = { __ModuleLoader__: { load: (entry) => { factory = entry.factory } }, location: { reload: () => {} } }
@@ -74,7 +74,7 @@ function importPickerHarness(props = {}) {
   }
   const exports = loadImportTests(React, {
     fetch: (url, options) => new Promise((resolve, reject) => {
-      requests.push({ url, options, resolve: (data, ok = true) => resolve({ ok, status: ok ? 200 : 500, json: async () => data }), reject })
+      requests.push({ url, options, resolve: (data, ok = true, status = ok ? 200 : 500) => resolve({ ok, status, json: async () => data }), reject })
     }),
     setTimeout: (fn) => { timers.push(fn); return timers.length },
   })
@@ -82,7 +82,7 @@ function importPickerHarness(props = {}) {
     while (dirty) {
       dirty = false
       cursor = 0
-      tree = exports.ImportPicker({ lang: 'en', onClose: () => { closed = true }, runCommand: async (command) => { commands.push(command); return { ok: true } }, ...props })
+      tree = exports[props.component || 'ImportPicker']({ lang: 'en', onClose: () => { closed = true }, runCommand: async (command) => { commands.push(command); return { ok: true } }, ...props })
       const pending = effects
       effects = []
       pending.forEach((effect) => effect())
@@ -118,6 +118,43 @@ function importPickerHarness(props = {}) {
     unmount() { hooks.forEach((hook) => hook?.cleanup?.()) },
   }
 }
+
+test('SSH manager: explicit save/test/delete and revision conflict have separate effects', async () => {
+  const ui = importPickerHarness({ component: 'SshSourceManager' })
+  const data = { revision: 'r0', writable: true, sources: [] }
+  assert.equal(ui.requests.length, 1)
+  ui.requests[0].resolve(data); await ui.flush()
+  ui.button('Add SSH source').props.onClick(); await ui.flush()
+  const change = async (key, value) => { ui.find(n => n.props?.['data-codex-source-field'] === key).props.onChange({ target: { value } }); await ui.flush() }
+  await change('id', 'lab'); await change('host', 'fixture.invalid')
+  assert.equal(ui.requests.length, 1, 'editing never connects')
+  ui.button('Test connection').props.onClick(); await ui.flush()
+  assert.equal(JSON.parse(ui.requests.at(-1).options.body).action, 'test')
+  assert.equal(JSON.parse(ui.requests.at(-1).options.body).revision, undefined)
+  ui.requests.at(-1).resolve({ ok: true, platform: 'posix', sessionRoot: true }); await ui.flush()
+  assert.ok(ui.nodes().some(n => n.props?.role === 'status' && ui.text(n).includes('No conversations')))
+  ui.find(n => n.type === 'form').props.onSubmit({ preventDefault() {} }); await ui.flush()
+  const save = JSON.parse(ui.requests.at(-1).options.body)
+  assert.equal(save.action, 'save'); assert.equal(save.revision, 'r0'); assert.equal(save.source.host, 'fixture.invalid')
+  const source = { ...save.source, id: 'lab' }
+  ui.requests.at(-1).resolve({ revision: 'r1', writable: true, sources: [source] }); await ui.flush()
+  ui.button('Delete').props.onClick(); await ui.flush()
+  assert.equal(ui.requests.length, 3, 'delete requires a confirmation')
+  ui.find(n => n.props?.['data-codex-source-confirm-delete'] !== undefined).props.onClick(); await ui.flush()
+  assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body), { action: 'delete', id: 'lab', revision: 'r1' })
+  ui.requests.at(-1).resolve({ error: 'stale', code: 'SOURCE_CONFLICT' }, false, 409); await ui.flush()
+  assert.ok(ui.nodes().some(n => n.props?.role === 'alert' && ui.text(n).includes('another window')))
+  assert.equal(ui.find(n => n.props?.['data-codex-source-confirm-delete'] !== undefined).props.disabled, true)
+  ui.unmount()
+})
+
+test('SSH manager: unmount cancels load and stale replies do not update state', async () => {
+  const ui = importPickerHarness({ component: 'SshSourceManager' })
+  const request = ui.requests[0]; ui.unmount()
+  assert.equal(request.options.signal.aborted, true)
+  request.resolve({ revision: 'late', writable: true, sources: [] }); await ui.flush()
+  assert.equal(ui.button('Add SSH source').props.disabled, true)
+})
 
 const remoteSource = { id: 'server &/一', label: 'Configured server', kind: 'ssh' }
 function remoteCatalog(source = remoteSource, ids = ['remote-one']) {
