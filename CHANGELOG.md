@@ -6,7 +6,8 @@
 - Share source discovery/catalog/preview/import between the picker, slash command and deferred agent tool; remote import errors never fall back to local import.
 - Map remote project paths only through explicit local cwd mappings; history-only defaults, disjoint source-specific session ids, continuation ordering, cancellation and mapping-drift checks.
 - Keep auto-import/export local-only, preserve upstream tests, add Windows-compatible tests and adversarial regression coverage. Exclude upstream private deployment notes from the npm artifact.
-- No npm publication or production-profile installation. Live SSH/GUI acceptance and Linux filesystem tests remain separate gates.
+- Add explicit Windows OpenSSH sources (`platform: windows`), fixed PowerShell/`py -3` launch, pinned no-reparse Win32 reading, drive-path mappings and binary protocol tests.
+- Real Windows SSH catalog/dry-run verified read-only with bounded rollouts and zero persistence writes. No npm publication or production-profile installation; live GUI acceptance and Linux filesystem tests remain separate gates.
 
 ## 1.6.2 — 2026-10-05
 

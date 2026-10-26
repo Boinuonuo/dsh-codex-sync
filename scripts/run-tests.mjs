@@ -18,6 +18,7 @@ const suites = [
   'test/session-repair.test.mjs',
   'test/zstd-frame.test.mjs',
   'test/ssh-source.test.mjs',
+  'test/ssh-windows.test.mjs',
   'test/import-operations.test.mjs',
 ]
 

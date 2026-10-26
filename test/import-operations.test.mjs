@@ -122,6 +122,15 @@ test('mapping: longest prefix, component boundary, POSIX/Windows outputs, no imp
   assert.notEqual(importSessionId('thread-1', { remoteSource }), importSessionId('thread-1'))
 })
 
+test('Windows source cwd mapping is case-insensitive, separator-aware and bounded', () => {
+  const remoteSource = { id: 'win', platform: 'windows', cwdMappings: [{ from: 'D:\\Projects', to: 'C:\\Local' }, { from: 'D:\\Projects\\One', to: '/special' }] }
+  assert.equal(mappedImportCwd('d:/projects/App', { remoteSource }), 'C:\\Local\\App')
+  assert.equal(mappedImportCwd('D:\\Projects-other\\App', { remoteSource }), undefined)
+  assert.equal(mappedImportCwd('D:relative', { remoteSource }), undefined)
+  assert.equal(mappedImportCwd('D:\\Projects\\One\\Sub', { remoteSource }), process.platform === 'win32' ? '\\special\\Sub' : '/special/Sub')
+  assert.equal(mappedImportCwd('D:\\Other', { remoteSource }), undefined)
+})
+
 test('source ids cannot alias local ids or ambiguous source/raw boundaries', () => {
   assert.notEqual(importSessionId('b-c', { remoteSource: { id: 'a' } }), importSessionId('c', { remoteSource: { id: 'a-b' } }))
   assert.notEqual(importSessionId('thread', { remoteSource: { id: 'a' } }), importSessionId('ssh-a-thread'))

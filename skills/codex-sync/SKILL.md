@@ -41,7 +41,7 @@ Use the deferred `codex_import` tool when available: `action: "sources"` discove
 ```
 
 - Source ids are configured in the plugin's `sshSources`; never invent a host or request a password/token in chat.
-- Remote access is read-only, uses system OpenSSH with strict known-host checks, and requires POSIX Python 3. Run a preview before importing selected ids. `--all` explicitly opts into all matching remote sessions.
+- Remote access is read-only and uses system OpenSSH with strict known-host checks. Configured platforms are POSIX with Python 3, or Windows OpenSSH with PowerShell and `py -3`. Run a preview before importing selected ids. `--all` explicitly opts into all matching remote sessions.
 - Explicit `cwdMappings` select local project directories. Unmapped sessions import history only, without a remote cwd; continuing them does not automatically execute tools over SSH.
 - Remote imports have source-specific ids, so a copied local Codex thread is not overwritten. Keep source ids stable after importing.
 - Auto-import and export remain local-only. Remote auth/config/Skills/MCP are never mirrored by this feature.

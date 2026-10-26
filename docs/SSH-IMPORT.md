@@ -15,7 +15,7 @@ This fork adds **read-only remote Codex conversation import** to the existing pi
 
 **Local:** system OpenSSH `ssh` on PATH and working key/agent or SSH-config authentication. Node with native Zstandard decoding, or `zstd` on PATH for compressed rollouts.
 
-**Remote:** POSIX machine with Python 3 and `O_NOFOLLOW`/directory-fd support (Linux is the intended target). Native Windows SSH servers are not supported in this version. The program runs Python through stdin; it does not install files on the remote.
+**Remote:** choose an explicit platform. `posix` (default) requires Python 3 and `O_NOFOLLOW`/directory-fd support. `windows` requires Windows OpenSSH, Windows PowerShell and the Python launcher `py -3`; it rejects reparse points/junctions and pins opened paths while reading. Both run a fixed Python program through stdin and do not install files on the remote.
 
 Before using the plugin, connect to the intended alias yourself with system SSH and verify the host fingerprint. The plugin forces `BatchMode=yes` and `StrictHostKeyChecking=yes`; it never prompts for a password or silently accepts a new host key. It reuses the owner's SSH configuration, including any intentionally configured proxy or identity settings.
 
@@ -28,6 +28,7 @@ sshSources:
   lab:
     label: Development server
     host: my-ssh-alias
+    platform: posix         # windows for Windows OpenSSH + py -3
     codexHome: ~/.codex
     # port: 22              # optional; otherwise SSH config/default applies
     cwdMappings:
@@ -41,9 +42,9 @@ sshSources:
 
 `sshSources` is a named object. Source ids allow ASCII letters/numbers, `_` and `-`, up to 64 characters, starting with a letter/number. Keep ids stable after importing. `host` accepts a conservative alias/hostname or `user@host`; use SSH config for identity files/proxies rather than putting credentials into plugin configuration. Optional `label` defaults to the id. Unsupported config fields are rejected.
 
-`codexHome` must be an absolute POSIX path or `~/…`, without `..` traversal. Symlinked source ancestors, sessions root, directories and files are not followed. Move/select the real directory if your Codex home is symlinked.
+`codexHome` must be an absolute POSIX path (`platform: posix`), a drive-absolute path such as `C:\Users\User\.codex` (`platform: windows`), or `~/…`, without `..` traversal. Windows UNC/device roots are rejected. Symlinked/reparse source ancestors, sessions root, directories and files are not followed. Move/select the real directory if your Codex home is symlinked.
 
-Mappings use longest **normalized component prefix**; `/srv/projects` does not match `/srv/projects-other`. `from` is POSIX absolute; `to` must be an absolute local path. Windows-unsafe suffix components are rejected rather than normalized into a different directory. An unmapped path is not guessed or created. Mappings do not copy project files. After the first import, the persisted session cwd is immutable: changing a mapping for an existing session is reported and import/preview refuses to silently remap it. Keep the old mapping or use a new source id for a separate import.
+Mappings use longest **normalized component prefix**; `/srv/projects` does not match `/srv/projects-other`. `from` is absolute in the source platform; Windows origins use case-insensitive drive-path matching and accept either slash style. `to` must be an absolute local path. Windows-unsafe suffix components are rejected rather than normalized into a different directory. An unmapped path is not guessed or created. Mappings do not copy project files. After the first import, the persisted session cwd is immutable: changing a mapping for an existing session is reported and import/preview refuses to silently remap it. Keep the old mapping or use a new source id for a separate import.
 
 Default budget: 60 seconds per snapshot, 1000 rollout files, 256 MiB transferred and retained decoded data, 64 MiB per rollout. Catalog and preview take fresh snapshots as well. Increase limits only for trusted sources and available memory/disk. The current importer reads staged files into memory; this is bounded, not streaming conversion.
 
@@ -76,6 +77,6 @@ Catalog/preview/import each reads the remote again. An actively written rollout 
 
 ## Validation and release gate
 
-Hermetic tests use synthetic data and fake SSH processes: strict arguments, protocol corruption, cancellation/timeout cleanup, decoded/wire limits, compressed multiple frames/checksums, dual-copy deduplication, continuation order, namespace separation, cwd mapping and shared UI/command/tool operations. POSIX Python filesystem/symlink fixtures are skipped on Windows; they still need Linux CI or a Linux acceptance run. A passing unit suite is not proof of real SSH or live GUI acceptance.
+Hermetic tests use synthetic data and fake SSH processes: strict arguments, protocol corruption, cancellation/timeout cleanup, decoded/wire limits, compressed multiple frames/checksums, dual-copy deduplication, continuation order, namespace separation, cwd mapping and shared UI/command/tool operations. POSIX Python filesystem/symlink fixtures are skipped on Windows; they still need Linux CI or a Linux acceptance run. Windows fixtures execute the real Win32/Python reader locally, including junction/root rejection, byte preservation, budgets and cleanup. A real Windows OpenSSH catalog + three-session dry-run was also exercised with a 4 MiB per-rollout bound: 19 projects, 27 visible sessions, 25 oversized skips, zero persistence writes and cleaned temporary storage. The full source was not imported. One initial transfer was truncated and safely rejected; later repeated reads passed. Live GUI and Linux fixture acceptance remain separate.
 
 Follow the repository release gate: local tests → packed artifact acceptance in an isolated/non-production DSH profile → user confirmation → GitHub code push; npm publication needs separate authorization. Do not replace the user's active desktop plugin just to run the tests.

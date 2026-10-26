@@ -77,7 +77,7 @@ test('normalize named sources preserves stable ids, labels and bounded defaults'
   assert.deepEqual(normalizeSshSources(undefined), [])
   assert.deepEqual(normalizeSshSources(null), [])
   assert.deepEqual(source(), {
-    id: 'box', label: 'box', host: 'tester@fake-host', codexHome: '~/.codex', cwdMappings: [],
+    id: 'box', label: 'box', host: 'tester@fake-host', platform: 'posix', codexHome: '~/.codex', cwdMappings: [],
     timeoutMs: 60000, maxFiles: 1000, maxTotalBytes: 268435456, maxSessionBytes: 67108864,
   })
   const raw = { prod: { host: 'linux-alias', label: 'Linux history', port: 2222, codexHome: '/srv/codex', cwdMappings: [{ from: '/work/project', to: 'C:\\Projects\\project' }] } }
@@ -120,6 +120,19 @@ test('normalize mapping roots before duplicate detection and cap snapshot time a
   for (const timeoutMs of [300001, 2147483647]) assert.throws(() => source({ timeoutMs }), { code: 'SSH_CONFIG' })
   assert.equal(source({ timeoutMs: 300000 }).timeoutMs, 300000)
   assert.equal(source({ timeoutMs: 1 }).timeoutMs, 1)
+})
+
+test('Windows source is explicit, validates drive paths and case-insensitive duplicate roots', () => {
+  const win = source({ platform: 'windows', codexHome: 'C:\\Users\\With Spaces\\.codex', cwdMappings: [{ from: 'D:/Projects/', to: 'C:\\Work' }] })
+  assert.equal(win.platform, 'windows')
+  assert.equal(win.cwdMappings[0].from, 'D:\\Projects')
+  assert.equal(source({ platform: 'windows' }).codexHome, '~/.codex')
+  for (const codexHome of ['relative', 'C:relative', '\\\\server\\share', 'C:\\a\\..\\b', 'C:\\a:stream']) assert.throws(() => source({ platform: 'windows', codexHome }), { code: 'SSH_CONFIG' })
+  assert.throws(() => source({ platform: 'auto' }), { code: 'SSH_CONFIG' })
+  assert.throws(() => source({ platform: 'windows', cwdMappings: [{ from: 'D:\\WORK', to: 'C:\\one' }, { from: 'd:/work/', to: 'C:\\two' }] }), /Duplicate/)
+  const args = __test.buildSshArgs(win)
+  assert.ok(args.at(-1).startsWith('powershell -NoProfile -NonInteractive -EncodedCommand '))
+  assert.ok(!args.at(-1).includes(win.codexHome))
 })
 
 test('SSH args force batch/strict host keys and base64 only remote configuration', () => {
