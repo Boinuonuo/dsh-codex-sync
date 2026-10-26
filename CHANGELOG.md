@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.3-ssh.0 — local fork preview (unreleased)
+
+- Add configured read-only SSH session sources, bounded temporary snapshots, strict host-key verification, and plain/concatenated-Zstandard rollout support.
+- Share source discovery/catalog/preview/import between the picker, slash command and deferred agent tool; remote import errors never fall back to local import.
+- Map remote project paths only through explicit local cwd mappings; history-only defaults, disjoint source-specific session ids, continuation ordering, cancellation and mapping-drift checks.
+- Keep auto-import/export local-only, preserve upstream tests, add Windows-compatible tests and adversarial regression coverage. Exclude upstream private deployment notes from the npm artifact.
+- No npm publication or production-profile installation. Live SSH/GUI acceptance and Linux filesystem tests remain separate gates.
+
 ## 1.6.2 — 2026-10-05
 
 - Import sessions in the installed DSH current format and support handle-based persistence, incremental assistant replies, new turns, and idempotent re-imports (PR #3).

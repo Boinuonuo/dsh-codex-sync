@@ -17,6 +17,8 @@ const suites = [
   'test/convert-order.test.mjs',
   'test/session-repair.test.mjs',
   'test/zstd-frame.test.mjs',
+  'test/ssh-source.test.mjs',
+  'test/import-operations.test.mjs',
 ]
 
 function findDshCheckout() {

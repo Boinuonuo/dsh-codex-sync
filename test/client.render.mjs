@@ -6,7 +6,7 @@
  *
  * Run: `node --test test/client.render.mjs`
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -15,6 +15,131 @@ import { dshDep } from './_env.mjs'
 
 const PROJECT = join(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
+
+function loadImportTests(React, globals = {}) {
+  const source = readFileSync(join(PROJECT, 'lib', 'client.js'), 'utf8')
+  const patched = source.replace('return module.exports; } });',
+    'module.exports.__cxTest = { ImportPicker, ImportSourceSelect, ImportDirectoryMapping, configuredImportSources, importCatalogUrl, importPreviewKey, isNodeSelectable, collectSelectable, labels }; return module.exports; } });')
+  assert.notEqual(patched, source)
+  let factory
+  const windowMock = { __ModuleLoader__: { load: (entry) => { factory = entry.factory } }, location: { reload: () => {} } }
+  new Function('window', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', patched)(
+    windowMock, globals.fetch, AbortController, globals.setTimeout || (() => 1), () => {},
+  )
+  return factory((id) => {
+    if (id === 'react') return React
+    if (id === 'react-dom') return {}
+    throw new Error(`unexpected require: ${id}`)
+  }).__cxTest
+}
+
+// A small deterministic hook harness exercises request ownership and event handlers
+// without adding a DOM/test-renderer dependency to this hand-authored CJS bundle.
+function importPickerHarness(props = {}) {
+  const hooks = []
+  const requests = []
+  const commands = []
+  const timers = []
+  let cursor = 0
+  let dirty = true
+  let tree
+  let effects = []
+  let closed = false
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
+    useState(initial) {
+      const index = cursor++
+      if (!hooks[index]) hooks[index] = { value: typeof initial === 'function' ? initial() : initial }
+      return [hooks[index].value, (value) => {
+        hooks[index].value = typeof value === 'function' ? value(hooks[index].value) : value
+        dirty = true
+      }]
+    },
+    useRef(value) {
+      const index = cursor++
+      if (!hooks[index]) hooks[index] = { current: value }
+      return hooks[index]
+    },
+    useEffect(effect, deps) {
+      const index = cursor++
+      const previous = hooks[index]
+      if (!previous || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
+        effects.push(() => {
+          previous?.cleanup?.()
+          hooks[index] = { deps, cleanup: effect() }
+        })
+      }
+    },
+    useCallback: (fn) => fn,
+  }
+  const exports = loadImportTests(React, {
+    fetch: (url, options) => new Promise((resolve, reject) => {
+      requests.push({ url, options, resolve: (data, ok = true) => resolve({ ok, status: ok ? 200 : 500, json: async () => data }), reject })
+    }),
+    setTimeout: (fn) => { timers.push(fn); return timers.length },
+  })
+  function render() {
+    while (dirty) {
+      dirty = false
+      cursor = 0
+      tree = exports.ImportPicker({ lang: 'en', onClose: () => { closed = true }, runCommand: async (command) => { commands.push(command); return { ok: true } }, ...props })
+      const pending = effects
+      effects = []
+      pending.forEach((effect) => effect())
+    }
+  }
+  function nodes() {
+    const found = []
+    const visit = (node) => {
+      if (Array.isArray(node)) return node.forEach(visit)
+      if (!node || typeof node !== 'object') return
+      found.push(node)
+      visit(node.props?.children)
+    }
+    visit(tree)
+    return found
+  }
+  const text = (node) => {
+    if (Array.isArray(node)) return node.map(text).join('')
+    return node && typeof node === 'object' ? text(node.props?.children) : String(node ?? '')
+  }
+  const find = (predicate) => {
+    const node = nodes().find(predicate)
+    assert.ok(node, 'expected picker element')
+    return node
+  }
+  render()
+  return {
+    requests, commands, timers, text, nodes, find,
+    get closed() { return closed },
+    button: (label) => find((node) => node.type === 'button' && text(node) === label),
+    source: () => find((node) => node.type?.name === 'ImportSourceSelect'),
+    async flush() { for (let i = 0; i < 12; i++) { await Promise.resolve(); render() } },
+    unmount() { hooks.forEach((hook) => hook?.cleanup?.()) },
+  }
+}
+
+const remoteSource = { id: 'server &/一', label: 'Configured server', kind: 'ssh' }
+function remoteCatalog(source = remoteSource, ids = ['remote-one']) {
+  return {
+    source, skippedBig: 2, unreadable: 1,
+    projects: [{ label: 'Remote project', cwd: '/srv/project', sourceCwd: '/srv/project', mappedCwd: 'C:\\project',
+      sessions: ids.map((id) => ({ id, title: id, sourceCwd: '/srv/project', cwd: 'C:\\project' })) }],
+  }
+}
+async function readyRemotePicker(props) {
+  const ui = importPickerHarness(props)
+  ui.requests.find((request) => request.url.endsWith('/sources')).resolve({ sources: [remoteSource, { id: 'second', label: 'Second', kind: 'ssh' }] })
+  ui.requests.find((request) => request.url.includes('/catalog?')).resolve({ projects: [] })
+  await ui.flush()
+  ui.source().props.onChange(remoteSource.id)
+  await ui.flush()
+  ui.requests.at(-1).resolve(remoteCatalog())
+  await ui.flush()
+  ui.button('Select all').props.onClick()
+  await ui.flush()
+  return ui
+}
 
 test('client bundle: loads, applies, renders SyncMenu without throwing', async (t) => {
   const reactDir = dshDep('react')
@@ -274,4 +399,262 @@ test('client bundle: contains export labels, URL parameters, and selectable logi
 
   // Selectable rule
   assert.match(source, /dshUpdated === true/)
+})
+
+test('import picker: SSR keeps local/export and renders configured sources and mappings bilingually', (t) => {
+  const reactDir = dshDep('react')
+  const reactDomDir = dshDep('react-dom')
+  if (!reactDir || !reactDomDir) return t.skip('react/react-dom unavailable')
+  const React = require(join(reactDir, 'index.js'))
+  const { renderToStaticMarkup } = require(join(reactDomDir, 'server.js'))
+  const ui = loadImportTests(React, { fetch: () => { throw new Error('SSR must not fetch') } })
+  for (const lang of ['en', 'zh']) {
+    const render = (component, props) => renderToStaticMarkup(React.createElement(component, { lang, ...props }))
+    const local = render(ui.ImportPicker, { onClose: () => {} })
+    assert.match(local, /<select[^>]+disabled/)
+    assert.match(local, /<option value="" selected="">(?:Local|本地)<\/option>/)
+    assert.doesNotMatch(local, /type="password"|placeholder="(?:host|password)/i)
+    const exported = render(ui.ImportPicker, { onClose: () => {}, mode: 'export' })
+    assert.doesNotMatch(exported, /<select|SSH|Preview import|预览导入/)
+    const selector = render(ui.ImportSourceSelect, { sources: [remoteSource], sourceId: remoteSource.id, onChange: () => {} })
+    assert.match(selector, /Configured server \(SSH\)/)
+    assert.match(selector, /value="server &amp;\/一" selected=""/)
+    assert.match(render(ui.ImportDirectoryMapping, { original: '/srv/project', mapped: 'C:\\project' }), /\/srv\/project/)
+    assert.match(render(ui.ImportDirectoryMapping, { original: '/srv/project', mapped: 'C:\\project' }), /C:\\project/)
+    assert.match(render(ui.ImportDirectoryMapping, { original: '/srv/project', mapped: null }), lang === 'en' ? /not mapped; history only/ : /未映射；仅导入历史/)
+    const drift = render(ui.ImportDirectoryMapping, { original: '/srv/project', mapped: 'C:\\saved', configured: 'D:\\configured', mappingChanged: true })
+    assert.match(drift, lang === 'en' ? /Saved directory: C:\\saved/ : /已保存目录: C:\\saved/)
+    assert.match(drift, lang === 'en' ? /Configured directory: D:\\configured/ : /当前配置目录: D:\\configured/)
+    assert.match(drift, lang === 'en' ? /Selection is blocked/ : /已禁止选择/)
+    assert.match(render(ui.ImportDirectoryMapping, { original: '/srv/project', mapped: null, configured: 'D:\\configured', mappingChanged: true }), lang === 'en' ? /Saved directory: not mapped; history only/ : /已保存目录: 未映射；仅导入历史/)
+    assert.match(ui.labels(lang).remoteReadOnly, lang === 'en' ? /read-only.*NOT automatically run through SSH/ : /只读.*不会自动通过 SSH 执行/)
+  }
+})
+
+test('import source helpers: only configured SSH options, encoded URL, exact preview identity', () => {
+  const helpers = loadImportTests({ createElement: () => {} })
+  assert.deepEqual(helpers.configuredImportSources({ sources: [remoteSource, remoteSource, { id: '', kind: 'ssh' }, { id: 'other', kind: 'local' }, null] }), [remoteSource])
+  assert.equal(helpers.importCatalogUrl(false, true, false, remoteSource.id), '/dsh-codex-sync/catalog?includeSubagents=1&source=' + encodeURIComponent(remoteSource.id))
+  assert.equal(helpers.importCatalogUrl(false, false, false, ''), '/dsh-codex-sync/catalog?includeSubagents=0')
+  assert.equal(helpers.importCatalogUrl(true, false, true, remoteSource.id), '/dsh-codex-sync/export-catalog?includeCodex=1&includeSubagents=0')
+  const key = helpers.importPreviewKey(remoteSource.id, ['two', 'one'], false, '')
+  assert.equal(key, helpers.importPreviewKey(remoteSource.id, ['one', 'two'], false, ''))
+  assert.notEqual(key, helpers.importPreviewKey('second', ['one', 'two'], false, ''))
+  assert.notEqual(key, helpers.importPreviewKey(remoteSource.id, ['one', 'three'], false, ''))
+  assert.notEqual(key, helpers.importPreviewKey(remoteSource.id, ['one', 'two'], true, ''))
+  assert.notEqual(key, helpers.importPreviewKey(remoteSource.id, ['one', 'two'], false, 'filter'))
+})
+
+test('import picker: remote import requires successful exact preview and posts source, ids, filter, dryRun', async () => {
+  const ui = await readyRemotePicker()
+  assert.equal(ui.button('Import 1').props.disabled, true)
+  const before = ui.requests.length
+  ui.button('Import 1').props.onClick()
+  await ui.flush()
+  assert.equal(ui.requests.length, before, 'handler also enforces preview')
+  ui.button('Preview import').props.onClick()
+  await ui.flush()
+  const previewRequest = ui.requests.at(-1)
+  assert.deepEqual(JSON.parse(previewRequest.options.body), { source: remoteSource.id, ids: ['remote-one'], includeSubagents: false, dryRun: true })
+  assert.equal(ui.button('Preview import').props.disabled, true)
+  assert.equal(ui.source().props.disabled, true)
+  assert.equal(ui.button('Cancel').props.disabled, true)
+  previewRequest.resolve({ ok: true, text: 'Would import 1 history' })
+  await ui.flush()
+  assert.equal(ui.timers.length, 0, 'preview must not reload or show success completion')
+  assert.equal(ui.button('Import 1').props.disabled, false)
+  assert.ok(ui.nodes().some((node) => ui.text(node).includes('Would import 1 history')))
+  ui.button('Import 1').props.onClick()
+  await ui.flush()
+  assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body), { source: remoteSource.id, ids: ['remote-one'], includeSubagents: false, dryRun: false })
+  ui.requests.at(-1).resolve({ ok: true, text: 'Imported 1' })
+  await ui.flush()
+  assert.equal(ui.timers.length, 1)
+  assert.equal(ui.commands.length, 0)
+  ui.unmount()
+})
+
+test('import picker: selection/search/subagent/source changes invalidate remote preview', async () => {
+  const ui = await readyRemotePicker()
+  const preview = async () => {
+    ui.button('Preview import').props.onClick()
+    await ui.flush()
+    ui.requests.at(-1).resolve({ ok: true, text: 'Previewed' })
+    await ui.flush()
+    assert.equal(ui.button('Import 1').props.disabled, false)
+  }
+  await preview()
+  ui.button('Select all').props.onClick()
+  await ui.flush()
+  ui.button('Select all').props.onClick()
+  await ui.flush()
+  assert.equal(ui.button('Import 1').props.disabled, true, 'same IDs selected again still need fresh preview')
+  await preview()
+  const search = () => ui.find((node) => node.type === 'input')
+  search().props.onChange({ target: { value: 'remote' } })
+  await ui.flush()
+  search().props.onChange({ target: { value: '' } })
+  await ui.flush()
+  assert.equal(ui.button('Import 1').props.disabled, true, 'changing then restoring a search must invalidate preview')
+  await preview()
+  ui.button('Hide sub-agents').props.onClick()
+  await ui.flush()
+  assert.equal(ui.button('Import 0').props.disabled, true)
+  assert.match(ui.requests.at(-1).url, /includeSubagents=1/)
+  ui.requests.at(-1).resolve(remoteCatalog())
+  await ui.flush()
+  assert.equal(ui.button('Import 1').props.disabled, true)
+  await preview()
+  ui.source().props.onChange('second')
+  await ui.flush()
+  assert.equal(ui.button('Import 0').props.disabled, true)
+  ui.requests.at(-1).resolve(remoteCatalog({ id: 'second', kind: 'ssh', label: 'Second' }))
+  await ui.flush()
+  assert.equal(ui.button('Import 0').props.disabled, true, 'source change clears selection')
+  ui.unmount()
+})
+
+test('import picker: SSH failures never fall back to local command or retain preview approval', async () => {
+  const ui = await readyRemotePicker()
+  ui.button('Preview import').props.onClick()
+  await ui.flush()
+  ui.requests.at(-1).resolve({ error: 'ssh unavailable' }, false)
+  await ui.flush()
+  assert.equal(ui.commands.length, 0)
+  assert.equal(ui.button('Import 1').props.disabled, true)
+  ui.button('Preview import').props.onClick()
+  await ui.flush()
+  ui.requests.at(-1).resolve({ ok: true, text: 'Previewed' })
+  await ui.flush()
+  ui.button('Import 1').props.onClick()
+  await ui.flush()
+  ui.requests.at(-1).reject(new Error('SSH disconnected'))
+  await ui.flush()
+  assert.equal(ui.commands.length, 0)
+  assert.equal(ui.button('Import 1').props.disabled, true)
+  assert.ok(ui.nodes().some((node) => ui.text(node).includes('no local import fallback')))
+  ui.unmount()
+})
+
+test('import picker: stale source, failed catalog, close and unmount responses are ignored and aborted', async () => {
+  const ui = importPickerHarness()
+  const localRequest = ui.requests.find((request) => request.url.includes('/catalog?'))
+  ui.requests.find((request) => request.url.endsWith('/sources')).resolve({ sources: [remoteSource, { id: 'second', kind: 'ssh' }] })
+  await ui.flush()
+  ui.source().props.onChange(remoteSource.id)
+  await ui.flush()
+  const firstRemote = ui.requests.at(-1)
+  assert.equal(localRequest.options.signal.aborted, true)
+  ui.source().props.onChange('second')
+  await ui.flush()
+  const secondRemote = ui.requests.at(-1)
+  assert.equal(firstRemote.options.signal.aborted, true)
+  secondRemote.resolve(remoteCatalog({ id: 'second', label: 'Second', kind: 'ssh' }, ['second-session']))
+  await ui.flush()
+  firstRemote.resolve(remoteCatalog())
+  localRequest.resolve({ error: 'stale failure' }, false)
+  await ui.flush()
+  ui.button('Select all').props.onClick()
+  await ui.flush()
+  ui.button('Preview import').props.onClick()
+  await ui.flush()
+  const pendingPreview = ui.requests.at(-1)
+  assert.deepEqual(JSON.parse(pendingPreview.options.body).ids, ['second-session'])
+  ui.unmount()
+  assert.equal(pendingPreview.options.signal.aborted, true)
+  pendingPreview.resolve({ ok: true, text: 'stale preview' })
+  await ui.flush()
+  assert.equal(ui.timers.length, 0)
+
+  const closing = importPickerHarness()
+  closing.button('Cancel').props.onClick()
+  assert.equal(closing.closed, true)
+  assert.ok(closing.requests.every((request) => request.options.signal.aborted))
+  closing.requests.forEach((request) => request.resolve({ projects: [], sources: [] }))
+  await closing.flush()
+  closing.unmount()
+})
+
+test('import picker: mapping drift blocks affected selection and shows saved versus configured cwd', async () => {
+  const helpers = loadImportTests({ createElement: () => {} })
+  const blockedId = 'ssh-codex-4-home-rollout'
+  const changed = { id: blockedId, title: 'Drifted session', sourceCwd: '/srv/project', cwd: 'C:\\saved', configuredCwd: 'D:\\configured', mappingChanged: true, imported: true, stale: true }
+  assert.equal(helpers.isNodeSelectable(changed, false), false)
+  assert.equal(helpers.isNodeSelectable({ ...changed, fromCodex: true, dshUpdated: true }, true), true, 'export rules remain unchanged')
+  assert.deepEqual(helpers.collectSelectable([{ sessions: [changed, { id: 'safe', title: 'Safe' }] }]), ['safe'])
+  const ui = importPickerHarness()
+  ui.requests.find((request) => request.url.endsWith('/sources')).resolve({ sources: [remoteSource] })
+  ui.requests.find((request) => request.url.includes('/catalog?')).resolve({ projects: [] })
+  await ui.flush()
+  ui.source().props.onChange(remoteSource.id)
+  await ui.flush()
+  const catalog = remoteCatalog()
+  catalog.projects[0].mappedCwd = 'D:\\configured'
+  catalog.projects[0].sessions = [changed]
+  ui.requests.at(-1).resolve(catalog)
+  await ui.flush()
+  assert.equal(ui.button('Preview import').props.disabled, true)
+  assert.ok(ui.nodes().some((node) => ui.text(node).includes('Mapping changed')))
+  assert.equal(ui.nodes().some((node) => node.type?.name === 'ImportDirectoryMapping'), false, 'collapsed drift project must not present configured cwd as the actual mapping')
+  ui.find((node) => node.type === 'span' && ui.text(node) === 'Remote project').props.onClick()
+  await ui.flush()
+  const mapping = ui.find((node) => node.type?.name === 'ImportDirectoryMapping')
+  assert.equal(mapping.props.mapped, 'C:\\saved')
+  assert.equal(mapping.props.configured, 'D:\\configured')
+  assert.equal(mapping.props.mappingChanged, true)
+  const row = ui.find((node) => node.type === 'div' && node.props.children.some?.((child) => child?.type === 'span' && ui.text(child) === 'Drifted session'))
+  assert.equal(row.props.children[1].props.disabled, true)
+  ui.button('Select all').props.onClick()
+  await ui.flush()
+  assert.equal(ui.button('Import 0').props.disabled, true)
+  const before = ui.requests.length
+  ui.button('Preview import').props.onClick()
+  await ui.flush()
+  assert.equal(ui.requests.length, before)
+  ui.unmount()
+})
+
+test('import picker: rejects unconfigured source/catalog mismatch; local and export command fallbacks stay local', async () => {
+  const ui = await readyRemotePicker()
+  const before = ui.requests.length
+  ui.source().props.onChange('unconfigured')
+  await ui.flush()
+  assert.equal(ui.requests.length, before)
+  ui.source().props.onChange('second')
+  await ui.flush()
+  ui.requests.at(-1).resolve(remoteCatalog())
+  await ui.flush()
+  assert.ok(ui.nodes().some((node) => ui.text(node).includes('does not match')))
+  assert.equal(ui.button('Import 0').props.disabled, true)
+  ui.unmount()
+
+  const local = importPickerHarness()
+  local.requests.find((request) => request.url.endsWith('/sources')).resolve({ error: 'old host' }, false)
+  local.requests.find((request) => request.url.includes('/catalog?')).resolve({ projects: [{ label: 'Local', cwd: 'C:\\local', sessions: [{ id: 'local-one', title: 'Local session' }] }] })
+  await local.flush()
+  local.button('Select all').props.onClick()
+  await local.flush()
+  assert.equal(local.button('Import 1').props.disabled, false)
+  local.button('Import 1').props.onClick()
+  await local.flush()
+  assert.deepEqual(JSON.parse(local.requests.at(-1).options.body), { ids: ['local-one'], includeSubagents: false, dryRun: false })
+  local.requests.at(-1).reject(new Error('HTTP unavailable'))
+  await local.flush()
+  assert.deepEqual(local.commands, ['/import-codex --ids local-one'])
+  local.unmount()
+
+  const exported = importPickerHarness({ mode: 'export' })
+  assert.equal(exported.requests.length, 1, 'export must not fetch SSH sources')
+  exported.requests[0].resolve({ projects: [{ label: 'Local', cwd: 'C:\\local', sessions: [{ id: 'dsh-one', title: 'DSH session' }] }] })
+  await exported.flush()
+  exported.button('Select all').props.onClick()
+  await exported.flush()
+  exported.button('Export 1').props.onClick()
+  await exported.flush()
+  exported.button('Confirm export').props.onClick()
+  await exported.flush()
+  exported.requests.at(-1).reject(new Error('HTTP unavailable'))
+  await exported.flush()
+  assert.deepEqual(exported.commands, ['/export-codex --ids dsh-one'])
+  exported.unmount()
 })

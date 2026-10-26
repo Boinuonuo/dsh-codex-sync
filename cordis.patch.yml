@@ -16,6 +16,8 @@
 #   enableConfig:         inject config.toml summary  (default true)
 #   enableImport:         /import-codex & friends     (default true)
 #   maxSessionBytes:      import skip size guard      (default 256 MiB)
+#   sshSources:           named read-only SSH session sources (default none)
+#                         see docs/SSH-IMPORT.md for mapping and bounds
 #   mcpServers:           explicit MCP servers to mount
 #   mcpMirror:            auto-mirror codex mcp servers (default true)
 #   mcpMirrorDeny:        extra names never mirrored

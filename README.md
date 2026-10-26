@@ -129,6 +129,10 @@ dsh-codex-sync doctor
 
 ---
 
+## SSH remote session import (fork preview)
+
+This fork adds read-only import from configured SSH sources, with a source picker, preview, bounded compressed-rollout reads, and explicit local cwd mappings. Remote history does **not** automatically switch tool execution to SSH. Auto-import/export remain local-only. See [SSH import setup and limits](docs/SSH-IMPORT.md).
+
 ## 🎛️ Sync Settings & Toggles
 
 Click the **Codex Icon** in the sidebar to open the centered control modal:

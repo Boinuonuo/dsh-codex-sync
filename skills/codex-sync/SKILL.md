@@ -28,6 +28,24 @@ The composer **Import from Codex** button opens a picker: projects → chats, su
 
 Composer **Sync ▾** → **Import from Codex** opens the picker. After a successful import the page reloads in ~2.5s so new chats appear.
 
+## SSH remote conversations
+
+Use the deferred `codex_import` tool when available: `action: "sources"` discovers configured ids; `catalog` browses; `preview` writes no DSH sessions; `import` writes selected history. Omit `source` for local Codex. Catalog tool results are bounded; use `offset` to page projects, or the picker for very large projects.
+
+```text
+/import-codex --sources
+/import-codex --source lab --list
+/import-codex --source lab --dry-run --limit 20
+/import-codex --source lab --ids ssh-codex-3-lab-THREAD_ID
+/import-codex --source lab --all --dry-run
+```
+
+- Source ids are configured in the plugin's `sshSources`; never invent a host or request a password/token in chat.
+- Remote access is read-only, uses system OpenSSH with strict known-host checks, and requires POSIX Python 3. Run a preview before importing selected ids. `--all` explicitly opts into all matching remote sessions.
+- Explicit `cwdMappings` select local project directories. Unmapped sessions import history only, without a remote cwd; continuing them does not automatically execute tools over SSH.
+- Remote imports have source-specific ids, so a copied local Codex thread is not overwritten. Keep source ids stable after importing.
+- Auto-import and export remain local-only. Remote auth/config/Skills/MCP are never mirrored by this feature.
+
 ## Export DSH chats to Codex
 
 Writes **new** Codex rollouts (new uuid, text only — not a resume of the original thread; every export creates a new copy and never overwrites original):

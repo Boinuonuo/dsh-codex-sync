@@ -18,6 +18,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { dshDep } from './_env.mjs'
 
+import { pathToFileURL } from 'node:url'
+const importFile = (...parts) => import(pathToFileURL(join(...parts)).href)
 const PROJECT = join(import.meta.dirname, '..')
 const STATE_DIR = process.env.DSH_HOME ?? join(tmpdir(), 'cx-sync-state-test')
 
@@ -26,7 +28,7 @@ test('state: persisted settings override config defaults (DSH_HOME temp)', async
   const prevHome = process.env.DSH_HOME
   process.env.DSH_HOME = tempHome
   try {
-    const { effectiveSetting, writeState, readState } = await import(join(PROJECT, 'lib', 'state.js'))
+    const { effectiveSetting, writeState, readState } = await importFile(PROJECT, 'lib', 'state.js')
     // untouched → config defaults win
     assert.equal(effectiveSetting('enableInstructions', true), true)
     assert.equal(effectiveSetting('enableInstructions', false), false)
@@ -97,9 +99,9 @@ command = "computer"
       t.skip('cordis not found in the dsh installation')
       return
     }
-    const { Context, Service } = await import(join(cordisRoot, 'lib', 'index.js'))
-    const plugin = (await import(join(PROJECT, 'lib', 'index.js'))).default
-    const { startMcpMirror, formatMcpStatus } = await import(join(PROJECT, 'lib', 'mcp.js'))
+    const { Context, Service } = await importFile(cordisRoot, 'lib', 'index.js')
+    const plugin = (await importFile(PROJECT, 'lib', 'index.js')).default
+    const { startMcpMirror, formatMcpStatus } = await importFile(PROJECT, 'lib', 'mcp.js')
 
     class StubSystemPrompt extends Service { constructor(c) { super(c, 'systemPrompt', true) } section() { return () => {} } }
     class StubCommands extends Service {
@@ -117,10 +119,20 @@ command = "computer"
       if (typeof p === 'function' && p.name === 'FakeMcpClient') { mounted.push(cfg); return () => {} }
       return origPlugin(p, cfg)
     }
+    class StubTools extends Service {
+      constructor(c) { super(c, 'tools', true) }
+      register(def) { this.definition = def; return () => {} }
+    }
+    class StubPersistence extends Service {
+      constructor(c) { super(c, 'sessionPersistence', true) }
+      async list() { return [] }
+    }
     await ctx.plugin(StubSystemPrompt)
     await ctx.plugin(StubCommands)
     await ctx.plugin(StubWebServer)
-    const MCP_CONFIG = { codexHome, maxSkills: 30, mcpMirrorDeny: ['node_repl'], mcpMirrorSilent: ['exa'] }
+    await ctx.plugin(StubTools)
+    await ctx.plugin(StubPersistence)
+    const MCP_CONFIG = { codexHome, maxSkills: 30, mcpMirrorDeny: ['node_repl'], mcpMirrorSilent: ['exa'], sshSources: { lab: { host: 'test.invalid', label: 'Test lab' } } }
     await ctx.plugin(plugin, { ...MCP_CONFIG, mcpMirror: false }) // mirror tested separately below
     await new Promise((r) => setTimeout(r, 100))
 
@@ -155,7 +167,7 @@ command = "computer"
     assert.match(unknown.text, /未知设置/)
 
     // /import-codex: args parse from invocation.rawInput
-    const { parseInput } = await import(join(PROJECT, 'lib', 'index.js'))
+    const { parseInput } = await importFile(PROJECT, 'lib', 'index.js')
     assert.deepEqual(parseInput(' --limit 5 --since 2026-01-01'), { limit: 5, since: 1767225600000 })
     // bare boolean flags (e.g. --include-subagents) must not swallow the next value token
     assert.deepEqual(parseInput(' --include-subagents'), { 'include-subagents': true })
@@ -213,6 +225,22 @@ command = "computer"
     assert.equal(getSettings.status, 200)
     assert.equal(typeof getSettings.data.settings, 'object')
     assert.equal(getSettings.data.settings.enableImport, true)
+
+    // SSH discovery has one shared command/HTTP/tool operation; never connects for source discovery.
+    const getSources = await callHttp('GET', '/dsh-codex-sync/sources')
+    assert.deepEqual(getSources.data, { sources: [{ id: 'lab', label: 'Test lab', kind: 'ssh' }] })
+    const commandSources = await byName['import-codex'].handler(invocation('--sources'))
+    assert.deepEqual(JSON.parse(commandSources.text), getSources.data)
+    assert.equal(ctx.tools.definition.name, 'codex_import')
+    assert.equal(ctx.tools.definition.deferLoading, true)
+    const toolSources = await ctx.tools.definition.execute({ action: 'sources' }, { signal: new AbortController().signal })
+    assert.deepEqual(toolSources, getSources.data)
+    const localPreview = await callHttp('POST', '/dsh-codex-sync/import', { dryRun: true, ids: [] })
+    assert.equal(localPreview.status, 200)
+    assert.match(localPreview.data.text, /dry-run/)
+    const badSource = await callHttp('GET', '/dsh-codex-sync/catalog?source=missing')
+    assert.equal(badSource.status, 500)
+    assert.match(badSource.data.error, /Unknown SSH source/)
 
     // POST /setting
     const postSetting = await callHttp('POST', '/dsh-codex-sync/setting', { key: 'enableSkills', value: false })

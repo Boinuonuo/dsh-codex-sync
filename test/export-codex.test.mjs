@@ -69,6 +69,19 @@ test('exportToCodex writes a session_meta + response_item jsonl', async () => {
   assert.equal(userItem.payload.message, 'hi')
 })
 
+test('SSH history is excluded from local export even if explicitly selected', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'cx-export-ssh-'))
+  const persistence = {
+    async list() { return [{ id: 'ssh-codex-3-lab-thread', cwd: '/tmp/project' }] },
+    async inspect() { throw new Error('SSH history should not be inspected for local export') },
+  }
+  const catalog = await listExportCatalog(persistence, { includeCodex: true }, home)
+  assert.equal(catalog.projects.length, 0)
+  const result = await exportToCodex(persistence, { ids: ['ssh-codex-3-lab-thread'] }, home)
+  assert.match(result.join('\n'), /SSH history export is not supported/)
+  assert.equal(readdirSync(home).length, 0)
+})
+
 test('buildRolloutJsonl is parseable JSONL', () => {
   const text = buildRolloutJsonl({
     uuid: '11111111-1111-1111-1111-111111111111',
